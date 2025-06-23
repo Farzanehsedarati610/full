@@ -17,7 +17,8 @@ public class TransferServer {
         System.out.println("Loading mappings from " + MAPPINGS_FILE);
         String mappingContent = Files.readString(Paths.get(MAPPINGS_FILE));
         ledger = new JSONObject(mappingContent);
-
+        File usedFile = new File("used.json");
+        if (!usedFile.exists()) Files.writeString(usedFile.toPath(), "{}");
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
         server.createContext("/lookup", TransferServer::handleLookup);
         server.createContext("/transfer", TransferServer::handleTransfer);
