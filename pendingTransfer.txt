@@ -1,0 +1,16 @@
+// Build transfer instruction payload
+JSONObject payload = new JSONObject()
+  .put("routing", routing)
+  .put("account", account)
+  .put("amount", amount.toPlainString())
+  .put("hash", hash)
+  .put("timestamp", timestamp)
+  .put("reference", reference);
+
+// Write to pendingTransfers.txt
+Files.writeString(
+  Paths.get("pendingTransfers.txt"),
+  payload.toString() + "\n",
+  StandardOpenOption.CREATE, StandardOpenOption.APPEND
+);
+
