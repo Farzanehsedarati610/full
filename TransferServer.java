@@ -28,7 +28,17 @@ public class TransferServer {
         System.out.println("TransferServer running on port " + PORT);
         server.start();
     }
-
+public void handleTransfer(HttpServletRequest request, HttpServletResponse response) throws IOException {
+    try {
+        // transfer logic here
+    } catch (Exception e) {
+        e.printStackTrace();
+        response.setStatus(500);
+        response.getWriter().write("{\"error\": \"" + e.getMessage() + "\"}");
+        response.getWriter().flush();
+        response.getWriter().close();
+    }
+}
     private static void loadMappings() throws IOException {
         // Load mappings.json
         String mappingContent = Files.readString(Paths.get(MAPPINGS_FILE));
