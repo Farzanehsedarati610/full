@@ -11,6 +11,8 @@ public class TransferServer {
     private static final String MAPPINGS_FILE = "mappings.json";
     private static final String LEDGER_LOG = "ledger.log";
     private static final String QUEUE_FILE = "pendingTransfers.txt";
+        String filename = "toBank/transfer_" + reference + ".json";
+        Files.writeString(Paths.get(filename), payload.toString(), StandardOpenOption.CREATE);
     private static JSONObject ledger;
 
     public static void main(String[] args) throws Exception {
