@@ -1,106 +1,112 @@
-import com.sun.net.httpserver.*;
 import java.io.*;
-import java.math.BigDecimal;
-import java.net.InetSocketAddress;
+import java.net.*;
 import java.nio.file.*;
+import java.time.*;
 import java.util.*;
+import java.util.concurrent.*;
 import org.json.*;
 
 public class TransferServer {
+
     private static final int PORT = 8086;
     private static final String MAPPINGS_FILE = "mappings.json";
-    private static final String LEDGER_LOG = "ledger.log";
-    private static final String QUEUE_FILE = "pendingTransfers.txt";
-        String filename = "toBank/transfer_" + reference + ".json";
-        Files.writeString(Paths.get(filename), payload.toString(), StandardOpenOption.CREATE);
-    private static JSONObject ledger;
+    private static final String USED_FILE = "used.json";
+    private static final String LOG_FILE = "ledger.log";
+    private static final String PENDING_FILE = "pendingTransfers.txt";
+
+    private static JSONObject ledger = new JSONObject();
+    private static JSONObject used = new JSONObject();
 
     public static void main(String[] args) throws Exception {
-        System.out.println("Loading mappings from " + MAPPINGS_FILE);
-        String mappingContent = Files.readString(Paths.get(MAPPINGS_FILE));
-        ledger = new JSONObject(mappingContent);
-        File usedFile = new File("used.json");
-        if (!usedFile.exists()) Files.writeString(usedFile.toPath(), "{}");
-        used.put(hash, true);
-        Files.writeString(Paths.get(USED_FILE), used.toString(2));
+        loadMappings();
+
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
-        server.createContext("/lookup", TransferServer::handleLookup);
         server.createContext("/transfer", TransferServer::handleTransfer);
-        server.setExecutor(null);
-        server.start();
+        server.setExecutor(Executors.newCachedThreadPool());
         System.out.println("TransferServer running on port " + PORT);
+        server.start();
     }
 
-    private static final String USED_FILE = "used.json";
-    private static JSONObject used = new JSONObject();
+    private static void loadMappings() throws IOException {
+        // Load mappings.json
+        String mappingContent = Files.readString(Paths.get(MAPPINGS_FILE));
+        ledger = new JSONObject(mappingContent);
+
+        // Load or initialize used.json
+        File usedFile = new File(USED_FILE);
+        if (!usedFile.exists()) Files.writeString(usedFile.toPath(), "{}");
         String usedContent = Files.readString(Paths.get(USED_FILE));
         used = new JSONObject(usedContent);
-
-    private static void handleLookup(HttpExchange exchange) throws IOException {
-        String hash = getHashQuery(exchange);
-        JSONObject result = ledger.has(hash) ? ledger.getJSONObject(hash) : new JSONObject();
-        sendJson(exchange, result.toString(2));
     }
 
     private static void handleTransfer(HttpExchange exchange) throws IOException {
-        String hash = getHashQuery(exchange);
-        JSONObject entry = ledger.has(hash) ? ledger.getJSONObject(hash) : null;
+        URI uri = exchange.getRequestURI();
+        String query = uri.getQuery();
 
-        String response;
-        if (entry != null) {
-            BigDecimal amount = new BigDecimal(entry.getString("amount"));
-            String routing = entry.getString("routing");
-            String account = entry.getString("account");
-            String timestamp = new Date().toString();
-            String reference = UUID.randomUUID().toString();
-
-            // Build response object
-            JSONObject receipt = new JSONObject()
-                .put("status", "TRANSFER_AUTHORIZED")
-                .put("routing", routing)
-                .put("account", account)
-                .put("amount", amount.toPlainString())
-                .put("timestamp", timestamp)
-                .put("reference", reference);
-            response = receipt.toString(2);
-
-            // Write to pendingTransfers.txt
-            JSONObject transferInstruction = new JSONObject()
-                .put("hash", hash)
-                .put("routing", routing)
-                .put("account", account)
-                .put("amount", amount.toPlainString())
-                .put("timestamp", timestamp)
-                .put("reference", reference);
-            Files.writeString(Paths.get(QUEUE_FILE), transferInstruction + "\n",
-                StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-
-            // Log to ledger.log
-            String logLine = String.format(
-                "[%s] TRANSFER %s USD → %s/%s (%s)\n",
-                timestamp, amount.toPlainString(), routing, account, hash);
-            Files.writeString(Paths.get(LEDGER_LOG), logLine,
-                StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-
-        } else {
-            response = "{\"error\": \"Invalid or unknown hash\"}";
+        if (query == null || !query.startsWith("hash=")) {
+            sendJson(exchange, "{\"error\": \"Missing or invalid hash parameter.\"}");
+            return;
         }
 
-        sendJson(exchange, response);
-    }
-
-    private static String getHashQuery(HttpExchange exchange) {
-        String query = exchange.getRequestURI().getQuery();
-        return (query != null && query.startsWith("hash=")) ? query.substring(5) : null;
-    }
-
-    private static void sendJson(HttpExchange exchange, String body) throws IOException {
-        byte[] bytes = body.getBytes();
-        exchange.getResponseHeaders().set("Content-Type", "application/json");
-        exchange.sendResponseHeaders(200, bytes.length);
-        try (OutputStream os = exchange.getResponseBody()) {
-            os.write(bytes);
+        String hash = query.substring(5);
+        if (!ledger.has(hash)) {
+            sendJson(exchange, "{\"error\": \"Unknown hash.\"}");
+            return;
         }
+
+        if (used.has(hash)) {
+            sendJson(exchange, "{\"error\": \"This hash has already been used.\"}");
+            return;
+        }
+
+        JSONObject entry = ledger.getJSONObject(hash);
+        String routing = entry.getString("routing");
+        String account = entry.getString("account");
+        String amount = entry.getString("amount");
+
+        String timestamp = new Date().toString();
+        String reference = UUID.randomUUID().toString();
+
+        JSONObject payload = new JSONObject();
+        payload.put("hash", hash);
+        payload.put("routing", routing);
+        payload.put("account", account);
+        payload.put("amount", amount);
+        payload.put("timestamp", timestamp);
+        payload.put("reference", reference);
+
+        // ✅ Write to pendingTransfers.txt
+        Files.writeString(Paths.get(PENDING_FILE), payload.toString() + "\n",
+            StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+
+        // ✅ Append to ledger.log
+        Files.writeString(Paths.get(LOG_FILE),
+            "[" + timestamp + "] TRANSFER " + amount + " USD → " + routing + "/" + account + " (" + hash + ")\n",
+            StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+
+        // ✅ Write .json file to toBank/
+        Files.writeString(Paths.get("toBank/transfer_" + reference + ".json"),
+            payload.toString(), StandardOpenOption.CREATE);
+
+        // ✅ Mark hash as used
+        used.put(hash, true);
+        Files.writeString(Paths.get(USED_FILE), used.toString(2));
+
+        // ✅ Optionally remove from mappings
+        ledger.remove(hash);
+        Files.writeString(Paths.get(MAPPINGS_FILE), ledger.toString(2));
+
+        // Return transfer receipt
+        payload.put("status", "TRANSFER_AUTHORIZED");
+        sendJson(exchange, payload.toString());
+    }
+
+    private static void sendJson(HttpExchange exchange, String response) throws IOException {
+        exchange.getResponseHeaders().add("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, response.getBytes().length);
+        OutputStream os = exchange.getResponseBody();
+        os.write(response.getBytes());
+        os.close();
     }
 }
 
