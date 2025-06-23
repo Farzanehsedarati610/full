@@ -1,147 +1,139 @@
 import java.io.*;
 import java.net.*;
-import com.sun.net.httpserver.HttpServer;
-import com.sun.net.httpserver.HttpExchange;
-import java.nio.file.*;
-import java.time.*;
 import java.util.*;
-import java.util.concurrent.*;
-import org.json.*;
+import com.sun.net.httpserver.*;
 
 public class TransferServer {
+    private static Map<String, String> mappings = new HashMap<>();
+    private static Set<String> used = new HashSet<>();
 
-    private static final int PORT = 8086;
-    private static final String MAPPINGS_FILE = "mappings.json";
-    private static final String USED_FILE = "used.json";
-    private static final String LOG_FILE = "ledger.log";
-    private static final String PENDING_FILE = "pendingTransfers.txt";
-
-    private static JSONObject ledger = new JSONObject();
-    private static JSONObject used = new JSONObject();
-
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) throws IOException {
         loadMappings();
+        loadUsed();
 
-        HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
-        server.createContext("/transfer", TransferServer::handleTransfer);
-        server.setExecutor(Executors.newCachedThreadPool());
-        System.out.println("TransferServer running on port " + PORT);
+        HttpServer server = HttpServer.create(new InetSocketAddress(8086), 0);
+        server.createContext("/transfer", new TransferHandler());
+        server.setExecutor(null);
+        System.out.println("Server listening at http://localhost:8086");
         server.start();
     }
-public void handleTransfer(HttpServletRequest request, HttpServletResponse response) throws IOException {
-    try {
-        // transfer logic here
-    } catch (Exception e) {
-        e.printStackTrace();
-        response.setStatus(500);
-        response.getWriter().write("{\"error\": \"" + e.getMessage() + "\"}");
-        response.getWriter().flush();
-        response.getWriter().close();
-    }
-}
-    private static void loadMappings() throws IOException {
-        // Load mappings.json
-        String mappingContent = Files.readString(Paths.get(MAPPINGS_FILE));
-        ledger = new JSONObject(mappingContent);
-        if (!mappings.containsKey(hash)) {
-            response.setStatus(404);
-            response.getWriter().write("{\"error\": \"Hash not found or already used.\"}");
-            return;
-    }
 
-        // Load or initialize used.json
-        File usedFile = new File(USED_FILE);
-        if (!usedFile.exists()) Files.writeString(usedFile.toPath(), "{}");
-        String usedContent = Files.readString(Paths.get(USED_FILE));
-        used = new JSONObject(usedContent);
-    }
-        try {
-    // your transfer logic here
-    }
-        catch (Exception e) {
-             e.printStackTrace(); // optional logging
-             response.setStatus(500);
-             response.getWriter().write("{\"error\": \"Server error: " + e.getMessage() + "\"}");
-             response.setStatus(200);
-             response.getWriter().write("{\"status\": \"Transfer complete.\"}");
-             response.getWriter().flush();
-             response.getWriter().close();
-    }
+    static class TransferHandler implements HttpHandler {
+        public void handle(HttpExchange exchange) throws IOException {
+            String responseText = "";
+            try {
+                if (!exchange.getRequestMethod().equalsIgnoreCase("GET")) {
+                    exchange.sendResponseHeaders(405, 0);
+                    exchange.getResponseBody().write("Method Not Allowed".getBytes());
+                    return;
+                }
 
-    private static void handleTransfer(HttpExchange exchange) throws IOException {
-        URI uri = exchange.getRequestURI();
-        String query = uri.getQuery();
+                URI requestURI = exchange.getRequestURI();
+                String query = requestURI.getQuery();
 
-        if (query == null || !query.startsWith("hash=")) {
-            sendJson(exchange, "{\"error\": \"Missing or invalid hash parameter.\"}");
-            return;
+                Map<String, String> params = parseQuery(query);
+                String hash = params.get("hash");
+
+                if (hash == null || hash.isEmpty()) {
+                    responseText = "{\"error\": \"Missing hash parameter.\"}";
+                    sendJson(exchange, 400, responseText);
+                    return;
+                }
+
+                if (!mappings.containsKey(hash)) {
+                    responseText = "{\"error\": \"Hash not found or already used.\"}";
+                    sendJson(exchange, 404, responseText);
+                    return;
+                }
+
+                // Simulate drop to toBank/transfer_<hash>.json
+                File out = new File("toBank/transfer_" + hash.substring(0, 8) + ".json");
+                out.getParentFile().mkdirs();
+
+                try (FileWriter writer = new FileWriter(out)) {
+                    writer.write("{ \"hash\": \"" + hash + "\", \"routing\": \"" + mappings.get(hash) + "\" }");
+                }
+
+                used.add(hash);
+                mappings.remove(hash);
+                persistUsed();
+
+                responseText = "{\"status\": \"Transfer complete.\"}";
+                sendJson(exchange, 200, responseText);
+
+            } catch (Exception e) {
+                e.printStackTrace();
+                responseText = "{\"error\": \"Server exception: " + e.getMessage() + "\"}";
+                sendJson(exchange, 500, responseText);
+            }
         }
-        String hash = request.getParameter("hash");
-        if (hash == null || hash.isEmpty()) {
-            response.setStatus(400);
-            response.getWriter().write("{\"error\": \"Missing hash parameter.\"}");
-            return;
-        }
-
-        String hash = query.substring(5);
-        if (!ledger.has(hash)) {
-            sendJson(exchange, "{\"error\": \"Unknown hash.\"}");
-            return;
-        }
-
-        if (used.has(hash)) {
-            sendJson(exchange, "{\"error\": \"This hash has already been used.\"}");
-            return;
-        }
-
-        JSONObject entry = ledger.getJSONObject(hash);
-        String routing = entry.getString("routing");
-        String account = entry.getString("account");
-        String amount = entry.getString("amount");
-
-        String timestamp = new Date().toString();
-        String reference = UUID.randomUUID().toString();
-
-        JSONObject payload = new JSONObject();
-        payload.put("hash", hash);
-        payload.put("routing", routing);
-        payload.put("account", account);
-        payload.put("amount", amount);
-        payload.put("timestamp", timestamp);
-        payload.put("reference", reference);
-
-        // ✅ Write to pendingTransfers.txt
-        Files.writeString(Paths.get(PENDING_FILE), payload.toString() + "\n",
-            StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-
-        // ✅ Append to ledger.log
-        Files.writeString(Paths.get(LOG_FILE),
-            "[" + timestamp + "] TRANSFER " + amount + " USD → " + routing + "/" + account + " (" + hash + ")\n",
-            StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-
-        // ✅ Write .json file to toBank/
-        Files.writeString(Paths.get("toBank/transfer_" + reference + ".json"),
-            payload.toString(), StandardOpenOption.CREATE);
-
-        // ✅ Mark hash as used
-        used.put(hash, true);
-        Files.writeString(Paths.get(USED_FILE), used.toString(2));
-
-        // ✅ Optionally remove from mappings
-        ledger.remove(hash);
-        Files.writeString(Paths.get(MAPPINGS_FILE), ledger.toString(2));
-
-        // Return transfer receipt
-        payload.put("status", "TRANSFER_AUTHORIZED");
-        sendJson(exchange, payload.toString());
     }
 
-    private static void sendJson(HttpExchange exchange, String response) throws IOException {
-        exchange.getResponseHeaders().add("Content-Type", "application/json");
-        exchange.sendResponseHeaders(200, response.getBytes().length);
+    private static void sendJson(HttpExchange exchange, int code, String body) throws IOException {
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        byte[] bytes = body.getBytes();
+        exchange.sendResponseHeaders(code, bytes.length);
         OutputStream os = exchange.getResponseBody();
-        os.write(response.getBytes());
+        os.write(bytes);
+        os.flush();
         os.close();
+    }
+
+    private static void loadMappings() {
+        try (BufferedReader reader = new BufferedReader(new FileReader("mappings.json"))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.contains(":")) {
+                    String[] pair = line.replaceAll("[\"{},]", "").split(":");
+                    if (pair.length == 2) {
+                        mappings.put(pair[0].trim(), pair[1].trim());
+                    }
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("No mappings.json found, continuing with empty mappings.");
+        }
+    }
+
+    private static void loadUsed() {
+        try (BufferedReader reader = new BufferedReader(new FileReader("used.json"))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.contains("\"")) {
+                    String clean = line.replaceAll("[\"{},:]", "").trim();
+                    if (!clean.isEmpty()) used.add(clean);
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("No used.json found, continuing with empty used set.");
+        }
+    }
+
+    private static void persistUsed() {
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter("used.json"))) {
+            writer.write("{\n");
+            int i = 0;
+            for (String hash : used) {
+                writer.write("  \"" + hash + "\": true");
+                if (++i < used.size()) writer.write(",\n");
+            }
+            writer.write("\n}\n");
+        } catch (IOException e) {
+            System.err.println("Failed to write used.json: " + e.getMessage());
+        }
+    }
+
+    private static Map<String, String> parseQuery(String query) {
+        Map<String, String> params = new HashMap<>();
+        if (query != null) {
+            for (String param : query.split("&")) {
+                String[] pair = param.split("=");
+                if (pair.length == 2) {
+                    params.put(pair[0], pair[1]);
+                }
+            }
+        }
+        return params;
     }
 }
 
