@@ -19,6 +19,8 @@ public class TransferServer {
         ledger = new JSONObject(mappingContent);
         File usedFile = new File("used.json");
         if (!usedFile.exists()) Files.writeString(usedFile.toPath(), "{}");
+        used.put(hash, true);
+        Files.writeString(Paths.get(USED_FILE), used.toString(2));
         HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
         server.createContext("/lookup", TransferServer::handleLookup);
         server.createContext("/transfer", TransferServer::handleTransfer);
@@ -26,6 +28,11 @@ public class TransferServer {
         server.start();
         System.out.println("TransferServer running on port " + PORT);
     }
+
+    private static final String USED_FILE = "used.json";
+    private static JSONObject used = new JSONObject();
+        String usedContent = Files.readString(Paths.get(USED_FILE));
+        used = new JSONObject(usedContent);
 
     private static void handleLookup(HttpExchange exchange) throws IOException {
         String hash = getHashQuery(exchange);
