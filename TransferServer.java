@@ -136,4 +136,17 @@ public class TransferServer {
         return params;
     }
 }
+private static void persistMappings() {
+    try (BufferedWriter writer = new BufferedWriter(new FileWriter("mappings.json"))) {
+        writer.write("{\n");
+        int count = 0;
+        for (Map.Entry<String, String> entry : mappings.entrySet()) {
+            writer.write("  \"" + entry.getKey() + "\": \"" + entry.getValue() + "\"");
+            if (++count < mappings.size()) writer.write(",\n");
+        }
+        writer.write("\n}\n");
+    } catch (IOException e) {
+        System.err.println("Failed to write mappings.json: " + e.getMessage());
+    }
+}
 
