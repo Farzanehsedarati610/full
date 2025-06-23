@@ -106,6 +106,10 @@ public class TransferServer {
             }
         } catch (IOException e) {
             persistMappings();
+            used.add(hash);
+            mappings.remove(hash);
+            persistUsed();
+            persistMappings(); // ← add this line right here
             System.out.println("No used.json found, continuing with empty used set.");
         }
     }
