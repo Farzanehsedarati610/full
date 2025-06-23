@@ -105,7 +105,9 @@ public class TransferServer {
                 }
             }
         } catch (IOException e) {
-            persistMappings();
+            persistMappings(); used.add(hash);
+            mappings.remove(hash);
+            persistUsed();
             used.add(hash);
             mappings.remove(hash);
             persistUsed();
