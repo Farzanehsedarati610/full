@@ -1,33 +1,85 @@
 import com.sun.net.httpserver.*;
 import java.io.*;
+import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.nio.file.*;
 import java.util.*;
 import org.json.*;
 
 public class TransferServer {
+    private static final int PORT = 8086;
+    private static final String MAPPINGS_FILE = "mappings.json";
+    private static JSONObject ledger;
+
     public static void main(String[] args) throws Exception {
-        int port = 8086;
-        HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
+        System.out.println("Loading mappings from " + MAPPINGS_FILE);
+        String mappingContent = Files.readString(Paths.get(MAPPINGS_FILE));
+        ledger = new JSONObject(mappingContent);
 
-        String mappingContent = Files.readString(Paths.get("mappings.json"));
-        JSONObject ledger = new JSONObject(mappingContent);
+        HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
 
-        server.createContext("/lookup", exchange -> {
-            String query = exchange.getRequestURI().getQuery();  // ?hash=abc...
-            String hash = query != null && query.startsWith("hash=") ? query.substring(5) : null;
-            JSONObject result = ledger.has(hash) ? ledger.getJSONObject(hash) : new JSONObject();
-
-            String response = result.toString(2);
-            exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, response.getBytes().length);
-            exchange.getResponseBody().write(response.getBytes());
-            exchange.close();
-        });
+        server.createContext("/lookup", exchange -> handleLookup(exchange));
+        server.createContext("/transfer", exchange -> handleTransfer(exchange));
 
         server.setExecutor(null);
         server.start();
-        System.out.println("Server running on port " + port);
+        System.out.println("TransferServer running on port " + PORT);
+    }
+
+    private static void handleLookup(HttpExchange exchange) throws IOException {
+        String hash = getHashQuery(exchange);
+        JSONObject result = ledger.has(hash) ? ledger.getJSONObject(hash) : new JSONObject();
+
+        String response = result.toString(2);
+        sendJson(exchange, response);
+    }
+
+    private static void handleTransfer(HttpExchange exchange) throws IOException {
+        String hash = getHashQuery(exchange);
+        JSONObject entry = ledger.has(hash) ? ledger.getJSONObject(hash) : null;
+
+        String response;
+
+        if (entry != null) {
+            BigDecimal amount = new BigDecimal(entry.getString("amount"));
+            String routing = entry.getString("routing");
+            String account = entry.getString("account");
+            String reference = UUID.randomUUID().toString();
+            String timestamp = new Date().toString();
+
+            JSONObject receipt = new JSONObject()
+                .put("status", "TRANSFER_AUTHORIZED")
+                .put("routing", routing)
+                .put("account", account)
+                .put("amount", amount.toPlainString())
+                .put("timestamp", timestamp)
+                .put("reference", reference);
+
+            response = receipt.toString(2);
+
+            // Write to ledger log
+            String logLine = String.format(
+                "[%s] TRANSFER %s USD → %s/%s (%s)\n",
+                timestamp, amount.toPlainString(), routing, account, hash);
+            Files.writeString(Paths.get("ledger.log"), logLine, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } else {
+            response = "{\"error\": \"Invalid or unknown hash\"}";
+        }
+
+        sendJson(exchange, response);
+    }
+
+    private static String getHashQuery(HttpExchange exchange) {
+        String query = exchange.getRequestURI().getQuery();
+        return (query != null && query.startsWith("hash=")) ? query.substring(5) : null;
+    }
+
+    private static void sendJson(HttpExchange exchange, String body) throws IOException {
+        byte[] bytes = body.getBytes();
+        exchange.getResponseHeaders().add("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+        exchange.close();
     }
 }
 
