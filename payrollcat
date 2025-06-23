@@ -1,0 +1,9 @@
+{
+  "routing": "123456789",       // ← from previous 'cat' transfer
+  "account": "987654321",       // ← from previous 'cat' transfer
+  "amount": "3500000",
+  "category": "cat",
+  "purpose": "Payroll",
+  "cycle": "1st/15th"
+}
+
