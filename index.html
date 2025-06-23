@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>USD Transfer Lookup</title>
+</head>
+<body>
+  <h2>Enter SHA-256 Hash or SWIFT Code</h2>
+  <input id="hashInput" placeholder="Paste hash or SWIFT code here" size="80">
+  <button onclick="lookup()">Lookup</button>
+
+  <pre id="output" style="margin-top: 20px; font-size: 1.2em;"></pre>
+
+  <script>
+    async function lookup() {
+      const code = document.getElementById("hashInput").value.trim();
+      const res = await fetch("mappings.json");
+      const mappings = await res.json();
+
+      const entry = mappings[code];
+      const out = document.getElementById("output");
+
+      if (entry) {
+        out.textContent = `Routing Number: ${entry.routing}\nAccount Number: ${entry.account}`;
+      } else {
+        out.textContent = "No match found. Please check the code and try again.";
+      }
+    }
+  </script>
+</body>
+</html>
+
