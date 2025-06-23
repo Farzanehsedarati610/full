@@ -33,12 +33,29 @@ public class TransferServer {
         // Load mappings.json
         String mappingContent = Files.readString(Paths.get(MAPPINGS_FILE));
         ledger = new JSONObject(mappingContent);
+        if (!mappings.containsKey(hash)) {
+            response.setStatus(404);
+            response.getWriter().write("{\"error\": \"Hash not found or already used.\"}");
+            return;
+    }
 
         // Load or initialize used.json
         File usedFile = new File(USED_FILE);
         if (!usedFile.exists()) Files.writeString(usedFile.toPath(), "{}");
         String usedContent = Files.readString(Paths.get(USED_FILE));
         used = new JSONObject(usedContent);
+    }
+        try {
+    // your transfer logic here
+    }
+        catch (Exception e) {
+             e.printStackTrace(); // optional logging
+             response.setStatus(500);
+             response.getWriter().write("{\"error\": \"Server error: " + e.getMessage() + "\"}");
+             response.setStatus(200);
+             response.getWriter().write("{\"status\": \"Transfer complete.\"}");
+             response.getWriter().flush();
+             response.getWriter().close();
     }
 
     private static void handleTransfer(HttpExchange exchange) throws IOException {
@@ -47,6 +64,12 @@ public class TransferServer {
 
         if (query == null || !query.startsWith("hash=")) {
             sendJson(exchange, "{\"error\": \"Missing or invalid hash parameter.\"}");
+            return;
+        }
+        String hash = request.getParameter("hash");
+        if (hash == null || hash.isEmpty()) {
+            response.setStatus(400);
+            response.getWriter().write("{\"error\": \"Missing hash parameter.\"}");
             return;
         }
 
